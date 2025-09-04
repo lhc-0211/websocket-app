@@ -1,156 +1,472 @@
-import { useEffect, useRef, useState } from "react";
+import { saveAs } from "file-saver";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FixedSizeList } from "react-window";
-import { io, Socket } from "socket.io-client";
+import * as XLSX from "xlsx";
+import expIcon from "../assets/icon/ic-exp.svg";
+import { groupSymbols, LOST_TIMEOUT, MAX_MESSAGES } from "../utils/cfg";
+import type { LostMessage, Message, RateLog } from "../utils/types";
+import { RowCount } from "./rowTable/rowCount";
+import { RowLost } from "./rowTable/rowLost";
+import { RowMess } from "./rowTable/rowMess";
 
-const MAX_MESSAGES = 10000;
+const socketUrl = `ws://192.168.1.139:8080/events`;
 
-// Định nghĩa kiểu cho RowProps
-type RowProps = {
-  index: number;
-  style: React.CSSProperties;
-  data: string[];
-};
+export default function SocketViewer() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [lostMessages, setLostMessages] = useState<LostMessage[]>([]);
+  const [rateLogs, setRateLogs] = useState<RateLog[]>([]);
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
-function Row({ index, style, data }: RowProps) {
-  return (
-    <div style={style} className="px-2">
-      {data[index] || ""}
-    </div>
-  );
-}
-
-export default function SocketIOViewer() {
-  const [messages, setMessages] = useState<string[]>([]);
-  const [symbol, setSymbol] = useState<string>(""); // State cho input mã chứng khoán
-  const queueRef = useRef<string[]>([]);
-  const socketRef = useRef<Socket | null>(null);
+  const lastReceivedRef = useRef<number>(Date.now());
+  const socketRef = useRef<any | null>(null);
   const listRef = useRef<FixedSizeList>(null);
+  const lostListRef = useRef<FixedSizeList>(null);
+  const rateListRef = useRef<FixedSizeList>(null);
+  const lostStartRef = useRef<number | null>(null);
+  const countPingRef = useRef<number>(0);
+  const messagesRef = useRef<Message[]>([]);
+  // Lưu trữ mã, nguồn, và loại dữ liệu
+  const subscribedSymbolsRef = useRef<Map<string, Map<string, Set<string>>>>(
+    new Map()
+  );
 
-  // Khởi tạo Socket.IO
+  // Init IO.Socket
+  // useEffect(() => {
+  //   if (socketRef.current) {
+  //     socketRef.current.disconnect();
+  //     socketRef.current = null;
+  //   }
+
+  //   if (!socketUrl) {
+  //     console.error("REACT_APP_SOCKET_URL is not defined");
+  //     return;
+  //   }
+
+  //   socketRef.current = io.connect(socketUrl, {
+  //     autoConnect: false,
+  //     reconnection: false,
+  //   });
+
+  //   const socket = socketRef.current;
+
+  //   // worker service nhận message tu socket
+  //   const workerMess = new Worker(
+  //     new URL("./workerService/socketWorker.ts", import.meta.url)
+  //   );
+
+  //   workerMess.onmessage = (e) => {
+  //     console.log("e.data", e.data);
+
+  //     if (e.data.type === "batch") {
+  //       const batch = e.data.data.map((msg: string) => ({
+  //         time: new Date().toLocaleTimeString(),
+  //         content: msg,
+  //       }));
+
+  //       // push batch mới vào ref
+  //       messagesRef.current.push(...batch);
+
+  //       // limit số lượng messages
+  //       if (messagesRef.current.length > MAX_MESSAGES) {
+  //         messagesRef.current.splice(
+  //           0,
+  //           messagesRef.current.length - MAX_MESSAGES
+  //         );
+  //       }
+
+  //       // update state (render)
+  //       setMessages([...messagesRef.current]);
+  //     }
+  //   };
+
+  //   // worker service đếm message tu socket
+  //   const workerCountMess = new Worker(
+  //     new URL("./workerService/rateLoggerWorker.ts", import.meta.url)
+  //   );
+
+  //   workerCountMess.onmessage = (e) => {
+  //     if (e.data.type === "tick") {
+  //       setRateLogs((prev) => [...prev.slice(-MAX_MESSAGES + 1), e.data]);
+  //     }
+  //   };
+
+  //   socket.on("connect", () => {
+  //     console.log("Socket connected");
+  //     // Gửi lại lệnh join cho các mã đã đăng ký
+  //     subscribedSymbolsRef.current.forEach((sourceMap, symbol) => {
+  //       if (sourceMap.size > 0) {
+  //         const message = { action: "join", data: symbol };
+  //         socket.emit("regs", JSON.stringify(message));
+  //       }
+  //     });
+  //   });
+
+  //   socket.on("reconnect", () => {
+  //     console.log("Socket reconnected");
+  //     // Gửi lại lệnh join cho các mã đã đăng ký
+  //     subscribedSymbolsRef.current.forEach((sourceMap, symbol) => {
+  //       if (sourceMap.size > 0) {
+  //         const message = { action: "join", data: symbol };
+  //         socket.emit("regs", JSON.stringify(message));
+  //       }
+  //     });
+  //   });
+
+  //   socket.on("disconnect", () => {
+  //     console.log("Socket disconnected");
+  //     // initSocket();
+  //   });
+
+  //   socket.on("reconnect_failed", () => {
+  //     console.log("Reconnect failed");
+  //     // initSocket();
+  //   });
+
+  //   socket.on("connect_error", (error: Error) => {
+  //     console.error("Connection error:", error.message);
+  //     // initSocket();
+  //   });
+
+  //   socket.on("public", (msg: { data: unknown }) => {
+  //     if (!msg.data) return;
+
+  //     const payload = JSON.stringify(msg.data);
+  //     if (!payload) return;
+
+  //     // gửi message sang workerMess
+  //     workerMess.postMessage({ type: "newMessage", payload });
+
+  //     // gửi message sang workerCountMess
+  //     workerCountMess.postMessage({ type: "inc" });
+
+  //     lastReceivedRef.current = Date.now();
+  //   });
+
+  //   socket.on("private", (msg: { action: string; data: unknown }) => {
+  //     switch (msg.action) {
+  //       case "ping":
+  //         sendPing();
+  //         break;
+  //       default:
+  //         break;
+  //     }
+  //   });
+
+  //   socket.open((err?: Error) => {
+  //     console.log("socket open");
+  //     if (err) {
+  //       console.error("Socket connection error:", err.message);
+  //     } else {
+  //       console.log("Socket connected");
+  //     }
+  //   });
+
+  //   const pingInterval = setInterval(() => {
+  //     if (socket.connected) {
+  //       sendPing();
+  //     }
+  //   }, 10000);
+
+  //   return () => {
+  //     clearInterval(pingInterval);
+  //     workerMess.terminate();
+  //     workerCountMess.terminate();
+  //   };
+  // }, []);
+
+  // Init WebSocket
   useEffect(() => {
-    let retryTimer: number | null = null;
+    if (socketRef.current) {
+      socketRef.current.close();
+      socketRef.current = null;
+    }
 
-    const initSocket = () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-      }
+    if (!socketUrl) {
+      console.error("REACT_APP_SOCKET_URL is not defined");
+      return;
+    }
 
-      const socket = io("http://202.124.204.95:9999/ps", {
-        autoConnect: false,
-        reconnection: false,
-        transports: ["websocket"],
-      });
+    // WebSocket thuần
+    socketRef.current = new WebSocket(socketUrl);
+    const socket = socketRef.current;
 
-      socketRef.current = socket;
+    // worker service nhận message tu socket
+    const workerMess = new Worker(
+      new URL("./workerService/socketWorker.ts", import.meta.url)
+    );
 
-      socket.on("connect", () => {
-        console.log("Connected to Socket.IO server");
-      });
+    workerMess.onmessage = (e) => {
+      if (e.data.type === "batch") {
+        const batch = e.data.data.map((msg: string) => ({
+          time: new Date().toLocaleTimeString(),
+          content: msg,
+        }));
 
-      socket.on("message", (msg: string) => {
-        queueRef.current.push(msg);
-      });
+        messagesRef.current.push(...batch);
 
-      socket.on("disconnect", () => {
-        console.log("Disconnected, will retry...");
-        if (!retryTimer) {
-          retryTimer = setTimeout(() => {
-            retryTimer = null;
-            initSocket(); // gọi lại
-          }, 2000); // delay 2s tránh loop quá nhanh
+        if (messagesRef.current.length > MAX_MESSAGES) {
+          messagesRef.current.splice(
+            0,
+            messagesRef.current.length - MAX_MESSAGES
+          );
         }
-      });
 
-      socket.on("connect_error", (error) => {
-        console.error("Socket.IO connection error:", error);
-        if (!retryTimer) {
-          retryTimer = setTimeout(() => {
-            retryTimer = null;
-            initSocket(); // gọi lại
-          }, 2000);
+        setMessages([...messagesRef.current]);
+      }
+    };
+
+    // worker service đếm message tu socket
+    const workerCountMess = new Worker(
+      new URL("./workerService/rateLoggerWorker.ts", import.meta.url)
+    );
+
+    workerCountMess.onmessage = (e) => {
+      if (e.data.type === "tick") {
+        setRateLogs((prev) => [...prev.slice(-MAX_MESSAGES + 1), e.data]);
+      }
+    };
+
+    // ---- Các sự kiện WebSocket ----
+    socket.onopen = () => {
+      console.log("WS connected");
+
+      // Gửi lại lệnh join cho các mã đã đăng ký
+      subscribedSymbolsRef.current.forEach((sourceMap, symbol) => {
+        if (sourceMap.size > 0) {
+          const message = { action: "join", data: symbol };
+          socket.send(JSON.stringify(message));
         }
       });
     };
 
-    initSocket();
+    socket.onclose = () => {
+      console.log("WS disconnected");
+    };
 
-    const interval = setInterval(() => {
-      if (queueRef.current.length > 0) {
-        setMessages((prev) => {
-          const next = [...prev, ...queueRef.current].slice(-MAX_MESSAGES);
-          queueRef.current = [];
-          return next;
-        });
+    socket.onerror = (err: string) => {
+      console.error("WS error:", err);
+    };
+
+    socket.onmessage = (event: any) => {
+      try {
+        console.log("event", event.data);
+
+        const msg = JSON.parse(event.data);
+
+        if (msg) {
+          const payload = JSON.stringify(msg);
+
+          workerMess.postMessage({ type: "newMessage", payload });
+          workerCountMess.postMessage({ type: "inc" });
+
+          lastReceivedRef.current = Date.now();
+        }
+
+        if (msg?.action === "ping") {
+          sendPing();
+        }
+      } catch (e) {
+        console.error("WS parse error:", e);
       }
-    }, 100);
+    };
+
+    // Ping định kỳ
+    const pingInterval = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        sendPing();
+      }
+    }, 10000);
 
     return () => {
-      if (socketRef.current) socketRef.current.disconnect();
-      clearInterval(interval);
-      if (retryTimer) clearTimeout(retryTimer);
+      clearInterval(pingInterval);
+      workerMess.terminate();
+      workerCountMess.terminate();
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.close();
+      }
     };
   }, []);
 
-  // Auto-scroll tới tin nhắn mới nhất
+  // Check lost messages
   useEffect(() => {
-    if (listRef.current && messages.length > 0) {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      if (now - lastReceivedRef.current > LOST_TIMEOUT) {
+        if (!lostStartRef.current) {
+          // bắt đầu mất
+          lostStartRef.current = lastReceivedRef.current;
+        }
+      } else {
+        if (lostStartRef.current) {
+          // đã nhận lại message, lưu lost
+          const lost: LostMessage = {
+            startTime: new Date(lostStartRef.current).toLocaleTimeString(),
+            endTime: new Date(lastReceivedRef.current).toLocaleTimeString(),
+            duration: Math.round(
+              (lastReceivedRef.current - lostStartRef.current) / 1000
+            ),
+          };
+          setLostMessages((prev) => [...prev.slice(-MAX_MESSAGES + 1), lost]);
+          lostStartRef.current = null;
+        }
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Auto-scroll
+  useEffect(() => {
+    if (listRef.current && messages.length > 0)
       listRef.current.scrollToItem(messages.length - 1, "end");
-    }
-  }, [messages.length]);
+    if (lostListRef.current && lostMessages.length > 0)
+      lostListRef.current.scrollToItem(lostMessages.length - 1, "end");
+    if (rateListRef.current && rateLogs.length > 0)
+      rateListRef.current.scrollToItem(rateLogs.length - 1, "end");
+  }, [messages.length, lostMessages.length, rateLogs.length]);
 
-  // Xử lý gửi yêu cầu join
-  const handleJoin = () => {
-    if (socketRef.current && symbol.trim()) {
-      const message = JSON.stringify({ action: "join", data: symbol.trim() });
-      socketRef.current.emit("regs", message);
-      setSymbol(""); // Xóa input sau khi gửi
-    }
-  };
+  const sendPing = useCallback(() => {
+    if (!socketRef.current) return;
 
-  // Xử lý gửi yêu cầu leave
-  const handleLeave = () => {
-    if (socketRef.current && symbol.trim()) {
-      const message = JSON.stringify({ action: "leave", data: symbol.trim() });
-      socketRef.current.emit("message", message);
-      setSymbol(""); // Xóa input sau khi gửi
+    countPingRef.current++;
+    console.log("ping server", countPingRef.current);
+
+    const msg = { action: "ping", mode: "sync", data: " " };
+    socketRef.current.emit("regs", JSON.stringify(msg), () => {
+      countPingRef.current = 0;
+    });
+  }, []);
+
+  function subscribeGroup(group: string, groupName: string) {
+    if (!socketRef.current) return;
+
+    // Hủy group cũ nếu có
+    if (activeGroup) {
+      socketRef.current.emit("regs", {
+        action: "leave",
+        data: JSON.stringify(groupSymbols[activeGroup]),
+      });
     }
-  };
+
+    // Join group mới
+    socketRef.current.emit("regs", {
+      action: "join",
+      data: JSON.stringify(group),
+    });
+
+    setActiveGroup(groupName);
+    console.log("Subscribed to:", groupName);
+  }
+
+  const exportLostMessages = useCallback(() => {
+    if (lostMessages.length === 0) {
+      alert("Không có dữ liệu Lost Messages để export");
+      return;
+    }
+
+    // Chuyển đổi dữ liệu sang dạng bảng
+    const worksheet = XLSX.utils.json_to_sheet(
+      lostMessages.map((item, idx) => ({
+        STT: idx + 1,
+        "Start Time": item.startTime,
+        "End Time": item.endTime,
+        "Duration (s)": item.duration,
+      }))
+    );
+
+    // Tạo workbook
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "LostMessages");
+
+    // Xuất file Excel
+    const excelBuffer = XLSX.write(workbook, {
+      bookType: "xlsx",
+      type: "array",
+    });
+    const data = new Blob([excelBuffer], {
+      type: "application/octet-stream",
+    });
+
+    const date = new Date();
+    const formatted =
+      date.getFullYear().toString() +
+      String(date.getMonth() + 1).padStart(2, "0") +
+      String(date.getDate()).padStart(2, "0");
+
+    saveAs(data, `lost_messages_${formatted}.xlsx`);
+  }, [lostMessages]);
 
   return (
-    <div className="p-4">
-      <div className="mb-4 flex gap-2">
-        <input
-          type="text"
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          placeholder="Nhập mã chứng khoán (VD: ACB, MBS)"
-          className="px-2 py-1 border rounded text-white font-mono text-sm placeholder:text-gray-400 w-[300px]"
-        />
+    <>
+      {Object.keys(groupSymbols).map((g) => (
         <button
-          onClick={handleJoin}
-          className="px-4 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+          key={g}
+          className={`px-3 py-1 mr-2 mb-2 rounded cursor-pointer text-white ${
+            activeGroup === g ? "bg-blue-600" : "bg-black "
+          }`}
+          onClick={() => subscribeGroup(groupSymbols[g], g)}
         >
-          Đăng ký
+          {g}
         </button>
-        <button
-          onClick={handleLeave}
-          className="px-4 py-1 bg-red-600 text-white rounded hover:bg-red-700"
-        >
-          Hủy đăng ký
-        </button>
+      ))}
+
+      <div className="grid grid-cols-5 gap-4 h-[500px]">
+        {/* Messages */}
+        <div className="border rounded bg-black text-green-400 col-span-3">
+          <div className="px-2 py-1 font-bold text-white">Messages</div>
+          <FixedSizeList
+            ref={listRef}
+            height={500}
+            width="100%"
+            itemCount={messages.length}
+            itemSize={20}
+            itemData={messages}
+          >
+            {RowMess}
+          </FixedSizeList>
+        </div>
+
+        {/* Lost Messages */}
+        <div className="border rounded bg-black text-red-400 col-span-1">
+          <div>
+            <div className="px-2 py-1 font-bold text-white">
+              Lost Messages
+              <button
+                className="float-right cursor-pointer"
+                onClick={() => exportLostMessages()}
+              >
+                <img src={expIcon} alt="exp" />
+              </button>
+            </div>
+          </div>
+          <FixedSizeList
+            ref={lostListRef}
+            height={500}
+            width="100%"
+            itemCount={lostMessages.length}
+            itemSize={20}
+            itemData={lostMessages}
+          >
+            {RowLost}
+          </FixedSizeList>
+        </div>
+
+        {/* Rate Logs */}
+        <div className="border rounded bg-black text-yellow-400 col-span-1">
+          <div className="px-2 py-1 font-bold text-white">
+            Messages / Second
+          </div>
+          <FixedSizeList
+            ref={rateListRef}
+            height={500}
+            width="100%"
+            itemCount={rateLogs.length}
+            itemSize={20}
+            itemData={rateLogs}
+          >
+            {RowCount}
+          </FixedSizeList>
+        </div>
       </div>
-      <div className="h-[500px] w-full border rounded bg-black text-green-400 font-mono text-xs">
-        <FixedSizeList
-          ref={listRef}
-          height={500}
-          width="100%"
-          itemSize={20}
-          itemCount={messages.length}
-          itemData={messages}
-        >
-          {Row}
-        </FixedSizeList>
-      </div>
-    </div>
+    </>
   );
 }
