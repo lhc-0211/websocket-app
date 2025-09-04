@@ -9,7 +9,7 @@ import { RowCount } from "./rowTable/rowCount";
 import { RowLost } from "./rowTable/rowLost";
 import { RowMess } from "./rowTable/rowMess";
 
-const socketUrl = `ws://192.168.1.139:8080/events`;
+const socketUrl = import.meta.env.VITE_SOCKET_URL;
 
 export default function SocketViewer() {
   const [messages, setMessages] = useState<Message[]>([]);
