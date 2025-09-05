@@ -1,6 +1,7 @@
 import { saveAs } from "file-saver";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FixedSizeList } from "react-window";
+import io from "socket.io-client";
 import * as XLSX from "xlsx";
 import expIcon from "../assets/icon/ic-exp.svg";
 import { groupSymbols, LOST_TIMEOUT, MAX_MESSAGES } from "../utils/cfg";
@@ -31,163 +32,22 @@ export default function SocketViewer() {
   );
 
   // Init IO.Socket
-  // useEffect(() => {
-  //   if (socketRef.current) {
-  //     socketRef.current.disconnect();
-  //     socketRef.current = null;
-  //   }
-
-  //   if (!socketUrl) {
-  //     console.error("REACT_APP_SOCKET_URL is not defined");
-  //     return;
-  //   }
-
-  //   socketRef.current = io.connect(socketUrl, {
-  //     autoConnect: false,
-  //     reconnection: false,
-  //   });
-
-  //   const socket = socketRef.current;
-
-  //   // worker service nhận message tu socket
-  //   const workerMess = new Worker(
-  //     new URL("./workerService/socketWorker.ts", import.meta.url)
-  //   );
-
-  //   workerMess.onmessage = (e) => {
-  //     console.log("e.data", e.data);
-
-  //     if (e.data.type === "batch") {
-  //       const batch = e.data.data.map((msg: string) => ({
-  //         time: new Date().toLocaleTimeString(),
-  //         content: msg,
-  //       }));
-
-  //       // push batch mới vào ref
-  //       messagesRef.current.push(...batch);
-
-  //       // limit số lượng messages
-  //       if (messagesRef.current.length > MAX_MESSAGES) {
-  //         messagesRef.current.splice(
-  //           0,
-  //           messagesRef.current.length - MAX_MESSAGES
-  //         );
-  //       }
-
-  //       // update state (render)
-  //       setMessages([...messagesRef.current]);
-  //     }
-  //   };
-
-  //   // worker service đếm message tu socket
-  //   const workerCountMess = new Worker(
-  //     new URL("./workerService/rateLoggerWorker.ts", import.meta.url)
-  //   );
-
-  //   workerCountMess.onmessage = (e) => {
-  //     if (e.data.type === "tick") {
-  //       setRateLogs((prev) => [...prev.slice(-MAX_MESSAGES + 1), e.data]);
-  //     }
-  //   };
-
-  //   socket.on("connect", () => {
-  //     console.log("Socket connected");
-  //     // Gửi lại lệnh join cho các mã đã đăng ký
-  //     subscribedSymbolsRef.current.forEach((sourceMap, symbol) => {
-  //       if (sourceMap.size > 0) {
-  //         const message = { action: "join", data: symbol };
-  //         socket.emit("regs", JSON.stringify(message));
-  //       }
-  //     });
-  //   });
-
-  //   socket.on("reconnect", () => {
-  //     console.log("Socket reconnected");
-  //     // Gửi lại lệnh join cho các mã đã đăng ký
-  //     subscribedSymbolsRef.current.forEach((sourceMap, symbol) => {
-  //       if (sourceMap.size > 0) {
-  //         const message = { action: "join", data: symbol };
-  //         socket.emit("regs", JSON.stringify(message));
-  //       }
-  //     });
-  //   });
-
-  //   socket.on("disconnect", () => {
-  //     console.log("Socket disconnected");
-  //     // initSocket();
-  //   });
-
-  //   socket.on("reconnect_failed", () => {
-  //     console.log("Reconnect failed");
-  //     // initSocket();
-  //   });
-
-  //   socket.on("connect_error", (error: Error) => {
-  //     console.error("Connection error:", error.message);
-  //     // initSocket();
-  //   });
-
-  //   socket.on("public", (msg: { data: unknown }) => {
-  //     if (!msg.data) return;
-
-  //     const payload = JSON.stringify(msg.data);
-  //     if (!payload) return;
-
-  //     // gửi message sang workerMess
-  //     workerMess.postMessage({ type: "newMessage", payload });
-
-  //     // gửi message sang workerCountMess
-  //     workerCountMess.postMessage({ type: "inc" });
-
-  //     lastReceivedRef.current = Date.now();
-  //   });
-
-  //   socket.on("private", (msg: { action: string; data: unknown }) => {
-  //     switch (msg.action) {
-  //       case "ping":
-  //         sendPing();
-  //         break;
-  //       default:
-  //         break;
-  //     }
-  //   });
-
-  //   socket.open((err?: Error) => {
-  //     console.log("socket open");
-  //     if (err) {
-  //       console.error("Socket connection error:", err.message);
-  //     } else {
-  //       console.log("Socket connected");
-  //     }
-  //   });
-
-  //   const pingInterval = setInterval(() => {
-  //     if (socket.connected) {
-  //       sendPing();
-  //     }
-  //   }, 10000);
-
-  //   return () => {
-  //     clearInterval(pingInterval);
-  //     workerMess.terminate();
-  //     workerCountMess.terminate();
-  //   };
-  // }, []);
-
-  // Init WebSocket
   useEffect(() => {
     if (socketRef.current) {
-      socketRef.current.close();
+      socketRef.current.disconnect();
       socketRef.current = null;
     }
 
     if (!socketUrl) {
-      console.error("REACT_APP_SOCKET_URL is not defined");
+      console.error("VITE_SOCKET_URL is not defined");
       return;
     }
 
-    // WebSocket thuần
-    socketRef.current = new WebSocket(socketUrl);
+    socketRef.current = io.connect(socketUrl, {
+      autoConnect: false,
+      reconnection: false,
+    });
+
     const socket = socketRef.current;
 
     // worker service nhận message tu socket
@@ -196,14 +56,18 @@ export default function SocketViewer() {
     );
 
     workerMess.onmessage = (e) => {
+      console.log("e.data", e.data);
+
       if (e.data.type === "batch") {
         const batch = e.data.data.map((msg: string) => ({
           time: new Date().toLocaleTimeString(),
           content: msg,
         }));
 
+        // push batch mới vào ref
         messagesRef.current.push(...batch);
 
+        // limit số lượng messages
         if (messagesRef.current.length > MAX_MESSAGES) {
           messagesRef.current.splice(
             0,
@@ -211,6 +75,7 @@ export default function SocketViewer() {
           );
         }
 
+        // update state (render)
         setMessages([...messagesRef.current]);
       }
     };
@@ -226,53 +91,79 @@ export default function SocketViewer() {
       }
     };
 
-    // ---- Các sự kiện WebSocket ----
-    socket.onopen = () => {
-      console.log("WS connected");
-
+    socket.on("connect", () => {
+      console.log("Socket connected");
       // Gửi lại lệnh join cho các mã đã đăng ký
       subscribedSymbolsRef.current.forEach((sourceMap, symbol) => {
         if (sourceMap.size > 0) {
           const message = { action: "join", data: symbol };
-          socket.send(JSON.stringify(message));
+          socket.emit("regs", JSON.stringify(message));
         }
       });
-    };
+    });
 
-    socket.onclose = () => {
-      console.log("WS disconnected");
-    };
-
-    socket.onerror = (err: string) => {
-      console.error("WS error:", err);
-    };
-
-    socket.onmessage = (event: any) => {
-      try {
-        console.log("event", event.data);
-
-        const msg = JSON.parse(event.data);
-
-        if (msg) {
-          const payload = JSON.stringify(msg);
-
-          workerMess.postMessage({ type: "newMessage", payload });
-          workerCountMess.postMessage({ type: "inc" });
-
-          lastReceivedRef.current = Date.now();
+    socket.on("reconnect", () => {
+      console.log("Socket reconnected");
+      // Gửi lại lệnh join cho các mã đã đăng ký
+      subscribedSymbolsRef.current.forEach((sourceMap, symbol) => {
+        if (sourceMap.size > 0) {
+          const message = { action: "join", data: symbol };
+          socket.emit("regs", JSON.stringify(message));
         }
+      });
+    });
 
-        if (msg?.action === "ping") {
+    socket.on("disconnect", () => {
+      console.log("Socket disconnected");
+      // initSocket();
+    });
+
+    socket.on("reconnect_failed", () => {
+      console.log("Reconnect failed");
+      // initSocket();
+    });
+
+    socket.on("connect_error", (error: Error) => {
+      console.error("Connection error:", error.message);
+      // initSocket();
+    });
+
+    socket.on("public", (msg: { data: unknown }) => {
+      if (!msg.data) return;
+
+      const payload = JSON.stringify(msg.data);
+      if (!payload) return;
+
+      // gửi message sang workerMess
+      workerMess.postMessage({ type: "newMessage", payload });
+
+      // gửi message sang workerCountMess
+      workerCountMess.postMessage({ type: "inc" });
+
+      lastReceivedRef.current = Date.now();
+    });
+
+    socket.on("private", (msg: { action: string; data: unknown }) => {
+      switch (msg.action) {
+        case "ping":
           sendPing();
-        }
-      } catch (e) {
-        console.error("WS parse error:", e);
+          break;
+        default:
+          break;
       }
-    };
+    });
 
-    // Ping định kỳ
+    socket.open((err?: Error) => {
+      console.log("socket open");
+      if (err) {
+        console.error("Socket connection error:", err.message);
+      } else {
+        console.log("Socket connected");
+      }
+    });
+
     const pingInterval = setInterval(() => {
-      if (socket.readyState === WebSocket.OPEN) {
+      if (socket.connected) {
         sendPing();
       }
     }, 10000);
@@ -281,11 +172,121 @@ export default function SocketViewer() {
       clearInterval(pingInterval);
       workerMess.terminate();
       workerCountMess.terminate();
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.close();
-      }
     };
   }, []);
+
+  // Init WebSocket
+  // useEffect(() => {
+  //   if (socketRef.current) {
+  //     socketRef.current.close();
+  //     socketRef.current = null;
+  //   }
+
+  //   if (!socketUrl) {
+  //     console.error("REACT_APP_SOCKET_URL is not defined");
+  //     return;
+  //   }
+
+  //   // WebSocket thuần
+  //   socketRef.current = new WebSocket(socketUrl);
+  //   const socket = socketRef.current;
+
+  //   // worker service nhận message tu socket
+  //   const workerMess = new Worker(
+  //     new URL("./workerService/socketWorker.ts", import.meta.url)
+  //   );
+
+  //   workerMess.onmessage = (e) => {
+  //     if (e.data.type === "batch") {
+  //       const batch = e.data.data.map((msg: string) => ({
+  //         time: new Date().toLocaleTimeString(),
+  //         content: msg,
+  //       }));
+
+  //       messagesRef.current.push(...batch);
+
+  //       if (messagesRef.current.length > MAX_MESSAGES) {
+  //         messagesRef.current.splice(
+  //           0,
+  //           messagesRef.current.length - MAX_MESSAGES
+  //         );
+  //       }
+
+  //       setMessages([...messagesRef.current]);
+  //     }
+  //   };
+
+  //   // worker service đếm message tu socket
+  //   const workerCountMess = new Worker(
+  //     new URL("./workerService/rateLoggerWorker.ts", import.meta.url)
+  //   );
+
+  //   workerCountMess.onmessage = (e) => {
+  //     if (e.data.type === "tick") {
+  //       setRateLogs((prev) => [...prev.slice(-MAX_MESSAGES + 1), e.data]);
+  //     }
+  //   };
+
+  //   // ---- Các sự kiện WebSocket ----
+  //   socket.onopen = () => {
+  //     console.log("WS connected");
+
+  //     // Gửi lại lệnh join cho các mã đã đăng ký
+  //     subscribedSymbolsRef.current.forEach((sourceMap, symbol) => {
+  //       if (sourceMap.size > 0) {
+  //         const message = { action: "join", data: symbol };
+  //         socket.send(JSON.stringify(message));
+  //       }
+  //     });
+  //   };
+
+  //   socket.onclose = () => {
+  //     console.log("WS disconnected");
+  //   };
+
+  //   socket.onerror = (err: string) => {
+  //     console.error("WS error:", err);
+  //   };
+
+  //   socket.onmessage = (event: any) => {
+  //     try {
+  //       console.log("event", event.data);
+
+  //       const msg = JSON.parse(event.data);
+
+  //       if (msg) {
+  //         const payload = JSON.stringify(msg);
+
+  //         workerMess.postMessage({ type: "newMessage", payload });
+  //         workerCountMess.postMessage({ type: "inc" });
+
+  //         lastReceivedRef.current = Date.now();
+  //       }
+
+  //       if (msg?.action === "ping") {
+  //         sendPing();
+  //       }
+  //     } catch (e) {
+  //       console.error("WS parse error:", e);
+  //     }
+  //   };
+
+  //   // Ping định kỳ
+  //   const pingInterval = setInterval(() => {
+  //     if (socket.readyState === WebSocket.OPEN) {
+  //       sendPing();
+  //     }
+  //   }, 10000);
+
+  //   return () => {
+  //     clearInterval(pingInterval);
+  //     workerMess.terminate();
+  //     workerCountMess.terminate();
+  //     if (socket.readyState === WebSocket.OPEN) {
+  //       socket.close();
+  //     }
+  //   };
+  // }, []);
 
   // Check lost messages
   useEffect(() => {
