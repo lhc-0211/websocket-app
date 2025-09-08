@@ -10,13 +10,20 @@ import { RowCount } from "./rowTable/rowCount";
 import { RowLost } from "./rowTable/rowLost";
 import { RowMess } from "./rowTable/rowMess";
 
-const socketUrl = import.meta.env.VITE_SOCKET_URL;
+// Map vendor -> socket URL
+const SOCKET_MAP: Record<string, string> = {
+  UPS: "https://board.upstock.com.vn/ps",
+  CASC: "https://banggia.casc.vn/ps",
+  APEC: "https://board-api.apec.com.vn/ps",
+  SBSI: "https://sbboard.sbsi.vn/ps",
+};
 
 export default function SocketViewer() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [lostMessages, setLostMessages] = useState<LostMessage[]>([]);
   const [rateLogs, setRateLogs] = useState<RateLog[]>([]);
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const [vendor, setVendor] = useState<string>("UPS"); // default UPS
 
   const lastReceivedRef = useRef<number>(Date.now());
   const socketRef = useRef<any | null>(null);
@@ -26,22 +33,32 @@ export default function SocketViewer() {
   const lostStartRef = useRef<number | null>(null);
   const countPingRef = useRef<number>(0);
   const messagesRef = useRef<Message[]>([]);
-  // Lưu trữ mã, nguồn, và loại dữ liệu
   const subscribedSymbolsRef = useRef<Map<string, Map<string, Set<string>>>>(
     new Map()
   );
 
-  // Init IO.Socket
+  // Init IO.Socket mỗi khi vendor đổi
   useEffect(() => {
+    // reset dữ liệu khi đổi vendor
+    setMessages([]);
+    setLostMessages([]);
+    setRateLogs([]);
+    setActiveGroup(null);
+    messagesRef.current = [];
+    lostStartRef.current = null;
+
     if (socketRef.current) {
       socketRef.current.disconnect();
       socketRef.current = null;
     }
 
+    const socketUrl = SOCKET_MAP[vendor];
     if (!socketUrl) {
-      console.error("VITE_SOCKET_URL is not defined");
+      console.error("Vendor không có URL socket:", vendor);
       return;
     }
+
+    console.log("Connecting to", vendor, socketUrl);
 
     socketRef.current = io.connect(socketUrl, {
       autoConnect: false,
@@ -50,41 +67,29 @@ export default function SocketViewer() {
 
     const socket = socketRef.current;
 
-    // worker service nhận message tu socket
     const workerMess = new Worker(
       new URL("./workerService/socketWorker.ts", import.meta.url)
     );
-
     workerMess.onmessage = (e) => {
-      console.log("e.data", e.data);
-
       if (e.data.type === "batch") {
         const batch = e.data.data.map((msg: string) => ({
           time: new Date().toLocaleTimeString(),
           content: msg,
         }));
-
-        // push batch mới vào ref
         messagesRef.current.push(...batch);
-
-        // limit số lượng messages
         if (messagesRef.current.length > MAX_MESSAGES) {
           messagesRef.current.splice(
             0,
             messagesRef.current.length - MAX_MESSAGES
           );
         }
-
-        // update state (render)
         setMessages([...messagesRef.current]);
       }
     };
 
-    // worker service đếm message tu socket
     const workerCountMess = new Worker(
       new URL("./workerService/rateLoggerWorker.ts", import.meta.url)
     );
-
     workerCountMess.onmessage = (e) => {
       if (e.data.type === "tick") {
         setRateLogs((prev) => [...prev.slice(-MAX_MESSAGES + 1), e.data]);
@@ -92,19 +97,7 @@ export default function SocketViewer() {
     };
 
     socket.on("connect", () => {
-      console.log("Socket connected");
-      // Gửi lại lệnh join cho các mã đã đăng ký
-      subscribedSymbolsRef.current.forEach((sourceMap, symbol) => {
-        if (sourceMap.size > 0) {
-          const message = { action: "join", data: symbol };
-          socket.emit("regs", JSON.stringify(message));
-        }
-      });
-    });
-
-    socket.on("reconnect", () => {
-      console.log("Socket reconnected");
-      // Gửi lại lệnh join cho các mã đã đăng ký
+      console.log("Connected to", vendor);
       subscribedSymbolsRef.current.forEach((sourceMap, symbol) => {
         if (sourceMap.size > 0) {
           const message = { action: "join", data: symbol };
@@ -114,58 +107,29 @@ export default function SocketViewer() {
     });
 
     socket.on("disconnect", () => {
-      console.log("Socket disconnected");
-      // initSocket();
-    });
-
-    socket.on("reconnect_failed", () => {
-      console.log("Reconnect failed");
-      // initSocket();
+      console.log("❌ Disconnected from", vendor);
     });
 
     socket.on("connect_error", (error: Error) => {
-      console.error("Connection error:", error.message);
-      // initSocket();
+      console.error("⚠️ Connection error:", error.message);
     });
 
     socket.on("public", (msg: { data: unknown }) => {
       if (!msg.data) return;
-
       const payload = JSON.stringify(msg.data);
-      if (!payload) return;
-
-      // gửi message sang workerMess
       workerMess.postMessage({ type: "newMessage", payload });
-
-      // gửi message sang workerCountMess
       workerCountMess.postMessage({ type: "inc" });
-
       lastReceivedRef.current = Date.now();
     });
 
-    socket.on("private", (msg: { action: string; data: unknown }) => {
-      switch (msg.action) {
-        case "ping":
-          sendPing();
-          break;
-        default:
-          break;
-      }
+    socket.on("private", (msg: { action: string }) => {
+      if (msg.action === "ping") sendPing();
     });
 
-    socket.open((err?: Error) => {
-      console.log("socket open");
-      if (err) {
-        console.error("Socket connection error:", err.message);
-      } else {
-        console.log("Socket connected");
-      }
-    });
+    socket.open();
 
     const pingInterval = setInterval(() => {
-      if (socket.connected) {
-        sendPing();
-      }
+      if (socket.connected) sendPing();
     }, 10000);
 
     return () => {
@@ -173,133 +137,17 @@ export default function SocketViewer() {
       workerMess.terminate();
       workerCountMess.terminate();
     };
-  }, []);
-
-  // Init WebSocket
-  // useEffect(() => {
-  //   if (socketRef.current) {
-  //     socketRef.current.close();
-  //     socketRef.current = null;
-  //   }
-
-  //   if (!socketUrl) {
-  //     console.error("REACT_APP_SOCKET_URL is not defined");
-  //     return;
-  //   }
-
-  //   // WebSocket thuần
-  //   socketRef.current = new WebSocket(socketUrl);
-  //   const socket = socketRef.current;
-
-  //   // worker service nhận message tu socket
-  //   const workerMess = new Worker(
-  //     new URL("./workerService/socketWorker.ts", import.meta.url)
-  //   );
-
-  //   workerMess.onmessage = (e) => {
-  //     if (e.data.type === "batch") {
-  //       const batch = e.data.data.map((msg: string) => ({
-  //         time: new Date().toLocaleTimeString(),
-  //         content: msg,
-  //       }));
-
-  //       messagesRef.current.push(...batch);
-
-  //       if (messagesRef.current.length > MAX_MESSAGES) {
-  //         messagesRef.current.splice(
-  //           0,
-  //           messagesRef.current.length - MAX_MESSAGES
-  //         );
-  //       }
-
-  //       setMessages([...messagesRef.current]);
-  //     }
-  //   };
-
-  //   // worker service đếm message tu socket
-  //   const workerCountMess = new Worker(
-  //     new URL("./workerService/rateLoggerWorker.ts", import.meta.url)
-  //   );
-
-  //   workerCountMess.onmessage = (e) => {
-  //     if (e.data.type === "tick") {
-  //       setRateLogs((prev) => [...prev.slice(-MAX_MESSAGES + 1), e.data]);
-  //     }
-  //   };
-
-  //   // ---- Các sự kiện WebSocket ----
-  //   socket.onopen = () => {
-  //     console.log("WS connected");
-
-  //     // Gửi lại lệnh join cho các mã đã đăng ký
-  //     subscribedSymbolsRef.current.forEach((sourceMap, symbol) => {
-  //       if (sourceMap.size > 0) {
-  //         const message = { action: "join", data: symbol };
-  //         socket.send(JSON.stringify(message));
-  //       }
-  //     });
-  //   };
-
-  //   socket.onclose = () => {
-  //     console.log("WS disconnected");
-  //   };
-
-  //   socket.onerror = (err: string) => {
-  //     console.error("WS error:", err);
-  //   };
-
-  //   socket.onmessage = (event: any) => {
-  //     try {
-  //       console.log("event", event.data);
-
-  //       const msg = JSON.parse(event.data);
-
-  //       if (msg) {
-  //         const payload = JSON.stringify(msg);
-
-  //         workerMess.postMessage({ type: "newMessage", payload });
-  //         workerCountMess.postMessage({ type: "inc" });
-
-  //         lastReceivedRef.current = Date.now();
-  //       }
-
-  //       if (msg?.action === "ping") {
-  //         sendPing();
-  //       }
-  //     } catch (e) {
-  //       console.error("WS parse error:", e);
-  //     }
-  //   };
-
-  //   // Ping định kỳ
-  //   const pingInterval = setInterval(() => {
-  //     if (socket.readyState === WebSocket.OPEN) {
-  //       sendPing();
-  //     }
-  //   }, 10000);
-
-  //   return () => {
-  //     clearInterval(pingInterval);
-  //     workerMess.terminate();
-  //     workerCountMess.terminate();
-  //     if (socket.readyState === WebSocket.OPEN) {
-  //       socket.close();
-  //     }
-  //   };
-  // }, []);
+  }, [vendor]);
 
   // Check lost messages
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
       if (now - lastReceivedRef.current > LOST_TIMEOUT) {
-        if (!lostStartRef.current) {
-          // bắt đầu mất
+        if (!lostStartRef.current)
           lostStartRef.current = lastReceivedRef.current;
-        }
       } else {
         if (lostStartRef.current) {
-          // đã nhận lại message, lưu lost
           const lost: LostMessage = {
             startTime: new Date(lostStartRef.current).toLocaleTimeString(),
             endTime: new Date(lastReceivedRef.current).toLocaleTimeString(),
@@ -327,10 +175,8 @@ export default function SocketViewer() {
 
   const sendPing = useCallback(() => {
     if (!socketRef.current) return;
-
     countPingRef.current++;
     console.log("ping server", countPingRef.current);
-
     const msg = { action: "ping", mode: "sync", data: " " };
     socketRef.current.emit("regs", JSON.stringify(msg), () => {
       countPingRef.current = 0;
@@ -339,21 +185,16 @@ export default function SocketViewer() {
 
   function subscribeGroup(group: string, groupName: string) {
     if (!socketRef.current) return;
-
-    // Hủy group cũ nếu có
     if (activeGroup) {
       socketRef.current.emit("regs", {
         action: "leave",
         data: JSON.stringify(groupSymbols[activeGroup]),
       });
     }
-
-    // Join group mới
     socketRef.current.emit("regs", {
       action: "join",
       data: JSON.stringify(group),
     });
-
     setActiveGroup(groupName);
     console.log("Subscribed to:", groupName);
   }
@@ -363,8 +204,6 @@ export default function SocketViewer() {
       alert("Không có dữ liệu Lost Messages để export");
       return;
     }
-
-    // Chuyển đổi dữ liệu sang dạng bảng
     const worksheet = XLSX.utils.json_to_sheet(
       lostMessages.map((item, idx) => ({
         STT: idx + 1,
@@ -373,31 +212,39 @@ export default function SocketViewer() {
         "Duration (s)": item.duration,
       }))
     );
-
-    // Tạo workbook
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "LostMessages");
-
-    // Xuất file Excel
     const excelBuffer = XLSX.write(workbook, {
       bookType: "xlsx",
       type: "array",
     });
-    const data = new Blob([excelBuffer], {
-      type: "application/octet-stream",
-    });
-
+    const data = new Blob([excelBuffer], { type: "application/octet-stream" });
     const date = new Date();
     const formatted =
       date.getFullYear().toString() +
       String(date.getMonth() + 1).padStart(2, "0") +
       String(date.getDate()).padStart(2, "0");
-
     saveAs(data, `lost_messages_${formatted}.xlsx`);
   }, [lostMessages]);
 
   return (
     <>
+      {/* chọn vendor */}
+      <div className="mb-4">
+        <label className="mr-2 font-bold text-white">Chọn vendor:</label>
+        <select
+          value={vendor}
+          onChange={(e) => setVendor(e.target.value)}
+          className="border px-3 py-1 rounded bg-black w-20"
+        >
+          {Object.keys(SOCKET_MAP).map((v) => (
+            <option key={v} value={v}>
+              {v}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {Object.keys(groupSymbols).map((g) => (
         <button
           key={g}
@@ -428,16 +275,14 @@ export default function SocketViewer() {
 
         {/* Lost Messages */}
         <div className="border rounded bg-black text-red-400 col-span-1">
-          <div>
-            <div className="px-2 py-1 font-bold text-white">
-              Lost Messages
-              <button
-                className="float-right cursor-pointer"
-                onClick={() => exportLostMessages()}
-              >
-                <img src={expIcon} alt="exp" />
-              </button>
-            </div>
+          <div className="px-2 py-1 font-bold text-white">
+            Lost Messages
+            <button
+              className="float-right cursor-pointer"
+              onClick={() => exportLostMessages()}
+            >
+              <img src={expIcon} alt="exp" />
+            </button>
           </div>
           <FixedSizeList
             ref={lostListRef}
