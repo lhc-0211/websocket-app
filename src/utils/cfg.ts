@@ -8,8 +8,8 @@ export const groupSymbols: Record<string, string> = {
 };
 
 export const SOCKET_MAP: Record<string, string> = {
-  UPS: "https://board.upstock.com.vn/ps",
-  CASC: "https://banggia.casc.vn/ps",
   APEC: "https://board-api.apec.com.vn/ps",
+  CASC: "https://banggia.casc.vn/ps",
+  UPS: "https://board.upstock.com.vn/ps",
   SBSI: "https://sbboard.sbsi.vn/ps",
 };
