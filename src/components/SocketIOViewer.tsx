@@ -108,11 +108,11 @@ export default function SocketViewer() {
     });
 
     socket.on("disconnect", () => {
-      console.log("❌ Disconnected from", vendor);
+      console.log("Disconnected from", vendor);
     });
 
     socket.on("connect_error", (error: Error) => {
-      console.error("⚠️ Connection error:", error.message);
+      console.error("Connection error:", error.message);
     });
 
     socket.on("public", (msg: { data: unknown }) => {
