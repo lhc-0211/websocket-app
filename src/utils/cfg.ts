@@ -6,3 +6,10 @@ export const groupSymbols: Record<string, string> = {
   HNX30:
     "BVS,CAP,CEO,DHT,DTD,DVM,DXP,HUT,IDC,IDV,L14,L18,LAS,LHC,MBS,NTP,PLC,PSD,PVB,PVC,PVI,PVS,SHS,SLS,TMB,TNG,TVD,VC3,VCS,VGP",
 };
+
+export const SOCKET_MAP: Record<string, string> = {
+  UPS: "https://board.upstock.com.vn/ps",
+  CASC: "https://banggia.casc.vn/ps",
+  APEC: "https://board-api.apec.com.vn/ps",
+  SBSI: "https://sbboard.sbsi.vn/ps",
+};

@@ -4,19 +4,18 @@ import { FixedSizeList } from "react-window";
 import io from "socket.io-client";
 import * as XLSX from "xlsx";
 import expIcon from "../assets/icon/ic-exp.svg";
-import { groupSymbols, LOST_TIMEOUT, MAX_MESSAGES } from "../utils/cfg";
+import {
+  groupSymbols,
+  LOST_TIMEOUT,
+  MAX_MESSAGES,
+  SOCKET_MAP,
+} from "../utils/cfg";
 import type { LostMessage, Message, RateLog } from "../utils/types";
 import { RowCount } from "./rowTable/rowCount";
 import { RowLost } from "./rowTable/rowLost";
 import { RowMess } from "./rowTable/rowMess";
 
 // Map vendor -> socket URL
-const SOCKET_MAP: Record<string, string> = {
-  UPS: "https://board.upstock.com.vn/ps",
-  CASC: "https://banggia.casc.vn/ps",
-  APEC: "https://board-api.apec.com.vn/ps",
-  SBSI: "https://sbboard.sbsi.vn/ps",
-};
 
 export default function SocketViewer() {
   const [messages, setMessages] = useState<Message[]>([]);
