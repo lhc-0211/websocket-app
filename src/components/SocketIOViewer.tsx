@@ -177,7 +177,6 @@ export default function SocketViewer() {
   const sendPing = useCallback(() => {
     if (!socketRef.current) return;
     countPingRef.current++;
-    console.log("ping server", countPingRef.current);
     const msg = { action: "ping", mode: "sync", data: " " };
     socketRef.current.emit("regs", JSON.stringify(msg), () => {
       countPingRef.current = 0;
