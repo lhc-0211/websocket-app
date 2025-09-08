@@ -60,10 +60,9 @@ export default function SocketViewer() {
     console.log("Connecting to", vendor, socketUrl);
 
     socketRef.current = io.connect(socketUrl, {
-      autoConnect: true, // mặc định là true
-      reconnection: true, // bật reconnect
-      reconnectionAttempts: 5, // số lần thử reconnect (mặc định vô hạn)
-      reconnectionDelay: 2000, // thời gian chờ giữa các lần reconnect (ms)
+      reconnection: true,
+      reconnectionAttempts: Infinity, // thử reconnect vô hạn
+      reconnectionDelay: 2000, // 2s thử lại một lần
     });
 
     const socket = socketRef.current;
