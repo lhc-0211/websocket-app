@@ -22,7 +22,7 @@ export default function SocketViewer() {
   const [lostMessages, setLostMessages] = useState<LostMessage[]>([]);
   const [rateLogs, setRateLogs] = useState<RateLog[]>([]);
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
-  const [vendor, setVendor] = useState<string>("UPS"); // default UPS
+  const [vendor, setVendor] = useState<string>("APEC"); // default APEC
 
   const lastReceivedRef = useRef<number>(Date.now());
   const socketRef = useRef<any | null>(null);
@@ -234,7 +234,7 @@ export default function SocketViewer() {
         <select
           value={vendor}
           onChange={(e) => setVendor(e.target.value)}
-          className="border px-3 py-1 rounded bg-black w-20"
+          className="border px-3 py-1 rounded bg-black"
         >
           {Object.keys(SOCKET_MAP).map((v) => (
             <option key={v} value={v}>
